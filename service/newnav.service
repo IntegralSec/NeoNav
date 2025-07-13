@@ -1,0 +1,14 @@
+[Unit]
+Description=NeoNav Robot Controller
+After=network.target
+
+[Service]
+User=robot
+WorkingDirectory=/opt/neonav
+ExecStart=/usr/bin/python /opt/neonav/main.py
+Restart=always
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

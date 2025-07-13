@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Raspberry Pi Camera Control</title>
+    <!-- Materialize CSS (Material Design) -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f5f5f5;
+            text-align: center;
+            padding-top: 30px;
+        }
+        img {
+            width: 90%;
+            max-width: 640px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .status {
+            margin: 20px auto;
+            padding: 10px;
+            width: 90%;
+            max-width: 480px;
+        }
+    </style>
+</head>
+<body>
+
+    <h4>🚀 Raspberry Pi Camera Control</h4>
+
+    <img id="videoStream" src="{{ url_for('video_feed') }}" alt="Video Stream" class="z-depth-2">
+
+    <div class="container">
+        <div class="row">
+            <div class="col s12">
+                <button class="btn waves-effect blue" onclick="sendCommand('forward')">Forward</button>
+                <button class="btn waves-effect blue" onclick="sendCommand('backward')">Backward</button>
+                <button class="btn waves-effect blue" onclick="sendCommand('left')">Left</button>
+                <button class="btn waves-effect blue" onclick="sendCommand('right')">Right</button>
+                <button class="btn waves-effect red" onclick="sendCommand('stop')">Stop</button>
+                <button class="btn waves-effect orange" onclick="flipVideo()">Flip Video</button>
+                <button class="btn waves-effect red" onclick="window.location.href='/restart/flaskrobot'">Restart FlaskRobot</button>
+                <button class="btn waves-effect red" onclick="window.location.href='/restart/nginx'">Restart Nginx</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="status" class="status card-panel teal lighten-4">Status: Ready</div>
+
+    <!-- Materialize JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+
+    <script>
+        function updateStatus(message, isError = false) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = 'Status: ' + message;
+            statusDiv.className = 'status card-panel ' + (isError ? 'red lighten-4' : 'teal lighten-4');
+        }
+
+        function sendCommand(direction) {
+            fetch('/move/' + direction)
+                .then(response => {
+                    if (response.ok) {
+                        updateStatus(`Command sent: ${direction}`);
+                    } else {
+                        updateStatus(`Failed to send command: ${direction}`, true);
+                    }
+                })
+                .catch(() => {
+                    updateStatus(`Error sending command: ${direction}`, true);
+                });
+        }
+
+        function flipVideo() {
+            fetch('/flip')
+                .then(response => {
+                    if (response.ok) {
+                        updateStatus('Video flipped');
+                    } else {
+                        updateStatus('Failed to flip video', true);
+                    }
+                })
+                .catch(() => {
+                    updateStatus('Error flipping video', true);
+                });
+        }
+
+        // Keyboard controls
+        document.addEventListener('keydown', function(event) {
+            switch (event.key) {
+                case 'ArrowUp':
+                    sendCommand('forward');
+                    break;
+                case 'ArrowDown':
+                    sendCommand('backward');
+                    break;
+                case 'ArrowLeft':
+                    sendCommand('left');
+                    break;
+                case 'ArrowRight':
+                    sendCommand('right');
+                    break;
+                case ' ':
+                    sendCommand('stop');
+                    break;
+                case 'f':
+                case 'F':
+                    flipVideo();
+                    break;
+            }
+        });
+
+        // Auto-reconnect MJPEG stream if it breaks
+        const video = document.getElementById('videoStream');
+        video.addEventListener('error', () => {
+            console.log('Stream error, retrying...');
+            updateStatus('Reconnecting video stream...', true);
+            setTimeout(() => {
+                video.src = '{{ url_for('video_feed') }}' + '?_=' + new Date().getTime(); // cache-buster
+            }, 2000);
+        });
+    </script>
+
+</body>
+</html>
