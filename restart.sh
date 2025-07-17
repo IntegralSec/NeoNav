@@ -1,7 +1,7 @@
 #!/bin/bash
 
-echo "Restarting flaskrobot.service..."
-sudo systemctl restart flaskrobot.service
+echo "Restarting neonav.service..."
+sudo systemctl restart neonav.service
 
 echo "Service restarted."
 

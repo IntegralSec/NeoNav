@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "Stopping flaskrobot.service..."
-sudo systemctl stop flaskrobot.service
+echo "Stopping neonav.service..."
+sudo systemctl stop neonav.service
 
 echo "Service stopped."

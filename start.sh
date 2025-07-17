@@ -1,7 +1,7 @@
 #!/bin/bash
 
-echo "Start flaskrobot.service..."
-sudo systemctl start flaskrobot.service
+echo "Start neonav.service..."
+sudo systemctl start neonav.service
 
 echo "Service started."
 
