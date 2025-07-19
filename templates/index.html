@@ -2,122 +2,186 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>NeoNav Robot</title>
-    <!-- Materialize CSS (Material Design) -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css" rel="stylesheet">
+    <title>Robot Controller</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='pico.min.css') }}">
     <style>
         body {
-            background-color: #f5f5f5;
             text-align: center;
-            padding-top: 30px;
+            padding: 20px;
+            user-select: none;
         }
-        img {
-            width: 90%;
-            max-width: 640px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-        }
-        .status {
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            max-width: 400px;
             margin: 20px auto;
+        }
+        #status-box {
+            margin-top: 20px;
             padding: 10px;
-            width: 90%;
-            max-width: 480px;
+            border: 1px solid #333;
+            background-color: #f8f8f8;
+            width: 300px;
+            margin-left: auto;
+            margin-right: auto;
+            text-align: left;
+        }
+        #video-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0 auto 20px auto;
+            max-width: 640px;
+        }
+        #video-feed {
+            width: 100%;
+            height: auto;
+            background: #000;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+        button.active {
+            background-color: #4caf50 !important;
+            color: white !important;
         }
     </style>
 </head>
 <body>
+    <h1>🤖 Robot Controller</h1>
 
-    <img id="videoStream" src="{{ url_for('video_feed') }}" alt="Video Stream" class="z-depth-2">
-
-    <div class="container">
-        <div class="row">
-            <div class="col s12">
-                <button class="btn waves-effect blue" onclick="sendCommand('forward')">Forward</button>
-                <button class="btn waves-effect blue" onclick="sendCommand('backward')">Backward</button>
-                <button class="btn waves-effect blue" onclick="sendCommand('left')">Left</button>
-                <button class="btn waves-effect blue" onclick="sendCommand('right')">Right</button>
-                <button class="btn waves-effect red" onclick="sendCommand('stop')">Stop</button>
-                <button class="btn waves-effect red" onclick="window.location.href='/restart/flaskrobot'">Restart FlaskRobot</button>
-                <button class="btn waves-effect red" onclick="window.location.href='/restart/nginx'">Restart Nginx</button>
-            </div>
-        </div>
+    <div id="video-container">
+        <img id="video-feed" src="{{ url_for('video_feed') }}" alt="Video feed will appear here">
     </div>
 
-    <div id="status" class="status card-panel teal lighten-4">Status: Ready</div>
+    <div class="button-grid">
+        <div></div>
+        <button id="btn-forward" onclick="sendCommand('forward')">Forward (W)</button>
+        <div></div>
 
-    <!-- Materialize JS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+        <button id="btn-left" onclick="sendCommand('left')">Left (A)</button>
+        <button id="btn-stop" onclick="sendCommand('stop')">Stop (Space)</button>
+        <button id="btn-right" onclick="sendCommand('right')">Right (D)</button>
+
+        <div></div>
+        <button id="btn-backward" onclick="sendCommand('backward')">Backward (S)</button>
+        <div></div>
+    </div>
+
+    <button onclick="flipVideo()">Flip Video</button>
+
+    <div id="status-box">
+        <strong>Status:</strong> <span id="status">Ready</span><br>
+        <strong>CPU:</strong> <span id="cpu">-</span><br>
+        <strong>Temperature:</strong> <span id="temp">-</span>
+    </div>
 
     <script>
-        function updateStatus(message, isError = false) {
-            const statusDiv = document.getElementById('status');
-            statusDiv.textContent = 'Status: ' + message;
-            statusDiv.className = 'status card-panel ' + (isError ? 'red lighten-4' : 'teal lighten-4');
+        function updateStatus(message) {
+            document.getElementById('status').innerText = message;
         }
 
-        function sendCommand(direction) {
-            fetch('/move/' + direction)
+        function sendCommand(command) {
+            fetch('/move/' + command, { method: 'POST' })
                 .then(response => {
-                    if (response.ok) {
-                        updateStatus(`Command sent: ${direction}`);
-                    } else {
-                        updateStatus(`Failed to send command: ${direction}`, true);
-                    }
+                    if (response.ok) updateStatus('Command sent: ' + command);
+                    else updateStatus('Failed to send command: ' + command);
                 })
-                .catch(() => {
-                    updateStatus(`Error sending command: ${direction}`, true);
+                .catch(error => {
+                    console.error('Error:', error);
+                    updateStatus('Error sending command: ' + command);
                 });
         }
 
         function flipVideo() {
-            fetch('/flip')
+            fetch('/flip', { method: 'POST' })
                 .then(response => {
-                    if (response.ok) {
-                        updateStatus('Video flipped');
-                    } else {
-                        updateStatus('Failed to flip video', true);
-                    }
+                    if (response.ok) updateStatus('Video flipped');
+                    else updateStatus('Failed to flip video');
                 })
-                .catch(() => {
-                    updateStatus('Error flipping video', true);
+                .catch(error => {
+                    console.error('Error:', error);
+                    updateStatus('Error flipping video');
                 });
         }
 
-        // Keyboard controls
+        function fetchSystemStats() {
+            fetch('/system_stats')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('cpu').innerText = data.cpu;
+                    document.getElementById('temp').innerText = data.temp;
+                })
+                .catch(error => console.error('Error fetching system stats:', error));
+        }
+
+        setInterval(fetchSystemStats, 5000);
+        window.onload = fetchSystemStats;
+
+        // Keyboard controls + button highlight
         document.addEventListener('keydown', function(event) {
-            switch (event.key) {
-                case 'ArrowUp':
-                    sendCommand('forward');
-                    break;
-                case 'ArrowDown':
-                    sendCommand('backward');
-                    break;
-                case 'ArrowLeft':
-                    sendCommand('left');
-                    break;
-                case 'ArrowRight':
-                    sendCommand('right');
-                    break;
-                case ' ':
-                    sendCommand('stop');
-                    break;
-                case 'f':
-                case 'F':
-                    flipVideo();
-                    break;
+            let cmd = null, btn = null;
+            switch(event.key) {
+                case 'w': case 'W': cmd = 'forward'; btn = 'btn-forward'; break;
+                case 's': case 'S': cmd = 'backward'; btn = 'btn-backward'; break;
+                case 'a': case 'A': cmd = 'left'; btn = 'btn-left'; break;
+                case 'd': case 'D': cmd = 'right'; btn = 'btn-right'; break;
+                case ' ': cmd = 'stop'; btn = 'btn-stop'; break;
+            }
+            if (cmd) {
+                sendCommand(cmd);
+                highlightButton(btn);
             }
         });
 
-        // Auto-reconnect MJPEG stream if it breaks
-        const video = document.getElementById('videoStream');
-        video.addEventListener('error', () => {
-            console.log('Stream error, retrying...');
-            updateStatus('Reconnecting video stream...', true);
-            setTimeout(() => {
-                video.src = '{{ url_for('video_feed') }}' + '?_=' + new Date().getTime(); // cache-buster
-            }, 2000);
-        });
-    </script>
+        function highlightButton(buttonId) {
+            document.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+            if (buttonId) {
+                document.getElementById(buttonId).classList.add('active');
+                setTimeout(() => {
+                    document.getElementById(buttonId).classList.remove('active');
+                }, 200);
+            }
+        }
 
+        // Auto-stop on window blur
+        window.addEventListener('blur', function() {
+            sendCommand('stop');
+            highlightButton('btn-stop');
+        });
+
+        // Swipe controls
+        let touchStartX = 0, touchStartY = 0;
+        document.addEventListener('touchstart', function(e) {
+            const touch = e.changedTouches[0];
+            touchStartX = touch.screenX;
+            touchStartY = touch.screenY;
+        }, false);
+
+        document.addEventListener('touchend', function(e) {
+            const touch = e.changedTouches[0];
+            const deltaX = touch.screenX - touchStartX;
+            const deltaY = touch.screenY - touchStartY;
+
+            const absX = Math.abs(deltaX);
+            const absY = Math.abs(deltaY);
+
+            let cmd = 'stop', btn = 'btn-stop';
+
+            if (Math.max(absX, absY) > 30) { // ignore tiny swipes
+                if (absX > absY) {
+                    if (deltaX > 0) { cmd = 'right'; btn = 'btn-right'; }
+                    else { cmd = 'left'; btn = 'btn-left'; }
+                } else {
+                    if (deltaY > 0) { cmd = 'backward'; btn = 'btn-backward'; }
+                    else { cmd = 'forward'; btn = 'btn-forward'; }
+                }
+            }
+
+            sendCommand(cmd);
+            highlightButton(btn);
+        }, false);
+    </script>
 </body>
 </html>
+

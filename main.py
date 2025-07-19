@@ -1,76 +1,59 @@
-import os
-import subprocess
-from flask import Flask, Response, render_template
+from flask import Flask, render_template, Response, jsonify
+from picamera2 import Picamera2
+import cv2
 import serial
 import time
-import atexit
+import subprocess
+import threading
 
 app = Flask(__name__)
 
-# Global flip flag
+# Global flags
 rotate_video = False
-process = None
-
 
 # Setup serial connection to Arduino
-SERIAL_PORT = '/dev/ttyUSB0'  # Adjust if needed
+SERIAL_PORT = '/dev/ttyUSB0'
 BAUD_RATE = 9600
 try:
     ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-    time.sleep(2)  # wait for Arduino reset
+    time.sleep(2)
 except serial.SerialException:
     ser = None
     print("Warning: Could not connect to Arduino")
 
-# Close the serial port on exit when the app is shut down
-@atexit.register
-def cleanup():
-    if ser:
-        ser.close()
-
-# Start libcamera-vid as background process
+# Start camera in background
+picam2 = Picamera2()
 def start_camera():
-    global process
-    args = ['libcamera-vid', '-t', '0', '--codec', 'mjpeg', '--width', '640', '--height', '480']
-    if rotate_video:
-        args += ['--rotation', '180']
-    args += ['-o', '-']
-    # process = subprocess.Popen(args, stdout=subprocess.PIPE, bufsize=10**8)
-    process = subprocess.Popen(
-        args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,  # <-- suppresses stderr
-        bufsize=10**8)
+    picam2.configure(picam2.create_video_configuration(
+        main={"size": (640, 480)},  # lower resolution to reduce CPU
+        controls={"FrameDurationLimits": (66666, 66666)}  # ~15 FPS
+    ))
+    picam2.start()
 
-# Start camera at launch
-start_camera()
+camera_thread = threading.Thread(target=start_camera)
+camera_thread.start()
 
-def camera_stream():
-    global process
-    buffer = b''
+def generate_frames():
+    global rotate_video
     while True:
-        chunk = process.stdout.read(1024)
-        if not chunk:
-            break
-        buffer += chunk
-
-        while b'\xff\xd8' in buffer and b'\xff\xd9' in buffer:
-            start = buffer.find(b'\xff\xd8')
-            end = buffer.find(b'\xff\xd9') + 2
-            jpg = buffer[start:end]
-            buffer = buffer[end:]
+        try:
+            frame = picam2.capture_array()
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            if rotate_video:
+                frame = cv2.rotate(frame, cv2.ROTATE_180)
+            _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])  # reduce JPEG quality
+            frame_bytes = buffer.tobytes()
             yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + jpg + b'\r\n')
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        except Exception as e:
+            print(f"Frame error: {e}")
+            time.sleep(1)
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/video_feed')
-def video_feed():
-    return Response(camera_stream(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/move/<direction>')
+@app.route('/move/<direction>', methods=['POST'])
 def move(direction):
     command_map = {
         'forward': 'FORWARD 150',
@@ -79,36 +62,57 @@ def move(direction):
         'right': 'RIGHT 150',
         'stop': 'STOP'
     }
-    try:
-        if ser and direction in command_map:
-            # Send the command to hardware (Arduino, motors, etc.)
-            ser.write((command_map[direction] + '\n').encode())
-        return ('', 200)
-    except Exception as e:
-        print(f"Error in /move/{direction}: {e}")
-        return ('', 500)
+    if ser and direction in command_map:
+        ser.write((command_map[direction] + '\n').encode())
+    return '', 204
 
-@app.route('/flip')
+@app.route('/flip', methods=['POST'])
 def flip():
-    global rotate_video, process
+    global rotate_video
     rotate_video = not rotate_video
+    return '', 204
+
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/system_stats')
+def system_stats():
+    # CPU usage
     try:
-        process.terminate()
-        process.wait()
-        start_camera()
-        print(f"Video flipped: rotation {'180' if rotate_video else '0'}")
-        return ('', 200)
+        with open('/proc/stat', 'r') as f:
+            line1 = f.readline()
+            parts1 = line1.split()
+            total1 = sum(map(int, parts1[1:]))
+            idle1 = int(parts1[4])
+
+        time.sleep(0.1)
+
+        with open('/proc/stat', 'r') as f:
+            line2 = f.readline()
+            parts2 = line2.split()
+            total2 = sum(map(int, parts2[1:]))
+            idle2 = int(parts2[4])
+
+        total_delta = total2 - total1
+        idle_delta = idle2 - idle1
+        cpu_usage = 100 * (total_delta - idle_delta) / total_delta
+        cpu_usage = f"{cpu_usage:.1f}"
     except Exception as e:
-        print(f"Error flipping video: {e}")
-        return ('', 500)
+        print(f"CPU error: {e}")
+        cpu_usage = "Unavailable"
 
-@app.route('/restart/<service>')
-def restart_service(service):
-    if service not in ["flaskrobot", "nginx"]:
-        return ('Invalid service', 400)
-    subprocess.run(["sudo", "systemctl", "restart", f"{service}.service"])
-    return redirect(url_for('index'))
+    # Temperature
+    try:
+        temp_output = subprocess.check_output(['vcgencmd', 'measure_temp']).decode()
+        temp_value = temp_output.split('=')[1].split("'")[0]
+    except Exception as e:
+        print(f"Temp error: {e}")
+        temp_value = "Unavailable"
 
+    return jsonify(cpu=f"{cpu_usage}%", temp=f"{temp_value}°C")
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, threaded=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)
+
